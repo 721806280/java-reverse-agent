@@ -337,8 +337,8 @@ public final class OfflineScanner {
 
     private static void coverageAssessment(StringBuilder sb, Map<String, MatchRule> hits,
                                            PatchResult patchResult) {
-        int validator = 0, popup = 0, forceTrue = 0, dto = 0, parser = 0, janetfilter = 0;
-        int online = 0, bindUnbind = 0, respGate = 0;
+        int validator = 0, popup = 0, forceTrue = 0, parser = 0, janetfilter = 0;
+        int online = 0, respGate = 0;
 
         for (MatchRule r : hits.values()) {
             if (r.name == null) continue;
@@ -346,11 +346,9 @@ public final class OfflineScanner {
                 case "neutralize-validator-core" -> validator++;
                 case "neutralize-piracy-popup" -> popup++;
                 case "force-valid-true" -> forceTrue++;
-                case "detect-validate-result" -> dto++;
                 case "deserialize-validate-json" -> parser++;
                 case "neutralize-janetfilter-probe" -> janetfilter++;
                 case "neutralize-online-validator" -> online++;
-                case "neutralize-bind-unbind" -> bindUnbind++;
                 case "neutralize-online-resp-gate" -> respGate++;
                 default -> {
                 }
@@ -360,19 +358,17 @@ public final class OfflineScanner {
         sb.append(String.format("  • 校验核心链 : %d 个类 (包含关键分支判断)\n", validator));
         sb.append(String.format("  • 盗版弹窗网 : %d 个类 (提示「购买正版」对话框)\n", popup));
         sb.append(String.format("  • 状态闸门   : %d 个类 (Kotlin getValid 逻辑通道)\n", forceTrue));
-        sb.append(String.format("  • 结果DTO模型: %d 个类 (Gson 序列化契约类)\n", dto));
         sb.append(String.format("  • JSON解析器  : %d 个类 (字符串反序列化)\n", parser));
         sb.append(String.format("  • 反破解探针 : %d 个类 (运行时 ja-netfilter 探测机制)\n", janetfilter));
         sb.append(String.format("  • 联网验证层 : %d 个类 (在线验证 API 端点)\n", online));
-        sb.append(String.format("  • 绑定解绑   : %d 个类 (UI 交互控制与流程入口)\n", bindUnbind));
         sb.append(String.format("  • 联网响应闸 : %d 个类 (连通性探测短路机制)\n", respGate));
         sb.append("\n");
 
         boolean rewriteComplete = patchResult == null || patchResult.failures().isEmpty();
-        boolean allCategoriesHit = validator > 0 && forceTrue > 0 && dto > 0 && parser > 0
-                && janetfilter > 0 && online > 0 && bindUnbind > 0 && respGate > 0;
+        boolean allCategoriesHit = validator > 0 && forceTrue > 0 && parser > 0
+                && janetfilter > 0 && online > 0 && respGate > 0;
         if (allCategoriesHit && rewriteComplete) {
-            sb.append("  ✅ [完整覆盖] 本地校验网、联网验证通道、DTO模型及反破解探针均已精准定位并安全短路。\n");
+            sb.append("  ✅ [完整覆盖] 本地校验网、联网验证通道、JSON解析器及反破解探针均已精准定位并安全短路。\n");
         } else if (!rewriteComplete) {
             sb.append("  ⚠️ [未完全成功] 至少存在 1 个目标类改写失败，请查阅 [patch] 详细日志。\n");
         } else if (validator > 0 && forceTrue > 0) {

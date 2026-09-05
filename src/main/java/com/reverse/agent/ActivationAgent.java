@@ -58,7 +58,6 @@ public final class ActivationAgent {
         List<MatchRule> rules = new ArrayList<>();
 
         // 联网验证层：业务 URL 子串 + HTTP 客户端类型是稳定语义锚点。
-        // 方法形状只限定参数数量和返回类型，避免依赖每次混淆后变化的包名/类名。
         rules.add(new MatchRule.Builder("neutralize-online-validator")
                 .stringContains("mybatispaidinfo/")
                 .string("okhttp3/OkHttpClient")
@@ -66,13 +65,6 @@ public final class ActivationAgent {
                         MatchRule.methodShape("(Ljava/lang/String;)Z"),
                         MatchRule.methodShape("(Ljava/lang/Object;)V"))
                 .action(MatchRule.Action.NEUTRALIZE_ALL)
-                .build());
-
-        // 激活/解绑对话框：只定位，不改动界面生命周期方法。
-        rules.add(new MatchRule.Builder("neutralize-bind-unbind")
-                .stringContains("unbind")
-                .string("paidKey")
-                .action(MatchRule.Action.LOG_ONLY)
                 .build());
 
         // 联网响应闸：失败文案 + 单参数对象返回对象，定位连通性探测方法。
@@ -89,7 +81,6 @@ public final class ActivationAgent {
                 .build());
 
         // 本地校验核心：解密后的分支常量组合。若类内嵌固定公钥，
-        // 则其本地校验方法形状为 ()V；用公钥 + 该形状精确定位。
         rules.add(new MatchRule.Builder("neutralize-validator-core")
                 .methodString("feimao")
                 .methodString("keyNotExist")
@@ -116,13 +107,6 @@ public final class ActivationAgent {
         rules.add(new MatchRule.Builder("force-valid-true")
                 .getter("getValid")
                 .action(MatchRule.Action.FORCE_TRUE)
-                .build());
-
-        // 验证结果模型：Gson 字段契约组合，仅记录。
-        rules.add(new MatchRule.Builder("detect-validate-result")
-                .serial("validTo")
-                .serial("paidKey")
-                .action(MatchRule.Action.LOG_ONLY)
                 .build());
 
         return rules;

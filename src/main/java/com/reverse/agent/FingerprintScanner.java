@@ -80,8 +80,8 @@ public final class FingerprintScanner {
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                  String signature, String[] exceptions) {
-                    Set<String> localStrings = new LinkedHashSet<>();
-                    methodStrings.put(descriptor, localStrings);
+                    Set<String> localStrings = methodStrings.computeIfAbsent(
+                            descriptor, key -> new LinkedHashSet<>());
                     return new MethodVisitor(Opcodes.ASM9) {
                         @Override
                         public void visitLdcInsn(Object value) {
