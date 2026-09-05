@@ -22,6 +22,10 @@ public final class FingerprintTransformer implements ClassFileTransformer {
     }
 
     static RewriteResult rewriteWithResult(byte[] buffer, MatchRule rule, AgentLogger log) {
+        ClassFingerprint fingerprint = FingerprintScanner.scan(buffer);
+        if (fingerprint == null) {
+            return new RewriteResult(buffer, 0);
+        }
         ClassReader reader = new ClassReader(buffer);
         int writerFlags = rule.action == MatchRule.Action.DESERIALIZE_JSON
                 ? ClassWriter.COMPUTE_FRAMES : ClassWriter.COMPUTE_MAXS;
@@ -31,7 +35,7 @@ public final class FingerprintTransformer implements ClassFileTransformer {
                 return "java/lang/Object";
             }
         };
-        ActionClassVisitor visitor = new ActionClassVisitor(writer, rule, log);
+        ActionClassVisitor visitor = new ActionClassVisitor(writer, rule, fingerprint, log);
         reader.accept(visitor, 0);
         return new RewriteResult(writer.toByteArray(), visitor.modifiedMethods);
     }
@@ -106,12 +110,15 @@ public final class FingerprintTransformer implements ClassFileTransformer {
     private static final class ActionClassVisitor extends ClassVisitor {
         private final MatchRule rule;
         private final AgentLogger log;
+        private final ClassFingerprint fingerprint;
         private boolean done;
         private int modifiedMethods;
 
-        ActionClassVisitor(ClassVisitor classVisitor, MatchRule rule, AgentLogger log) {
+        ActionClassVisitor(ClassVisitor classVisitor, MatchRule rule,
+                           ClassFingerprint fingerprint, AgentLogger log) {
             super(Opcodes.ASM9, classVisitor);
             this.rule = rule;
+            this.fingerprint = fingerprint;
             this.log = log;
         }
 
@@ -125,7 +132,8 @@ public final class FingerprintTransformer implements ClassFileTransformer {
             MethodVisitor methodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
             if ("<init>".equals(name) || "<clinit>".equals(name)
                     || (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0
-                    || !rule.matchesMethod(descriptor)) {
+                    || !rule.matchesMethod(descriptor)
+                    || !rule.matchesMethodStrings(fingerprint, descriptor)) {
                 return methodVisitor;
             }
 

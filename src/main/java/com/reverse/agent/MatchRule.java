@@ -22,6 +22,11 @@ public final class MatchRule {
     /** 必须整串命中的字符串常量。 */
     final Set<String> requireStrings;
 
+    /**
+     * 改写目标方法必须包含的全部字符串常量。空集表示不做方法级限定。
+     */
+    final Set<String> requireMethodStrings;
+
     /** 必须作为子串命中的字符串常量。 */
     final Set<String> requireStringContains;
 
@@ -39,11 +44,13 @@ public final class MatchRule {
 
     private MatchRule(String name, Set<String> requireSerials,
                       Set<String> requireStrings, Set<String> requireStringContains,
-                      Set<String> requireGetters, Set<String> requireMethodDescriptors,
+                      Set<String> requireGetters, Set<String> requireMethodStrings,
+                      Set<String> requireMethodDescriptors,
                       Action action) {
         this.name = name;
         this.requireSerials = requireSerials;
         this.requireStrings = requireStrings;
+        this.requireMethodStrings = requireMethodStrings;
         this.requireStringContains = requireStringContains;
         this.requireGetters = requireGetters;
         this.requireMethodDescriptors = requireMethodDescriptors;
@@ -84,7 +91,19 @@ public final class MatchRule {
                 }
             }
         }
+        if (!requireMethodStrings.isEmpty()) {
+            boolean found = fp.methodStrings.values().stream()
+                    .anyMatch(strings -> strings.containsAll(requireMethodStrings));
+            if (!found) {
+                return false;
+            }
+        }
         return true;
+    }
+
+    boolean matchesMethodStrings(ClassFingerprint fingerprint, String descriptor) {
+        return requireMethodStrings.isEmpty()
+                || fingerprint.stringsForMethod(descriptor).containsAll(requireMethodStrings);
     }
 
     /** 判断方法形状是否属于本规则的可改写范围。 */
@@ -137,6 +156,7 @@ public final class MatchRule {
     public String toString() {
         return "Rule[" + name + "] serials=" + requireSerials
                 + " strings=" + requireStrings
+                + " methodStrings=" + requireMethodStrings
                 + " contains=" + requireStringContains
                 + " getters=" + requireGetters
                 + " shapes=" + requireMethodDescriptors
@@ -170,6 +190,7 @@ public final class MatchRule {
         private final String name;
         private final Set<String> serials = new LinkedHashSet<>();
         private final Set<String> strings = new LinkedHashSet<>();
+        private final Set<String> methodStrings = new LinkedHashSet<>();
         private final Set<String> stringContains = new LinkedHashSet<>();
         private final Set<String> getters = new LinkedHashSet<>();
         private final Set<String> methodShapes = new LinkedHashSet<>();
@@ -186,6 +207,11 @@ public final class MatchRule {
 
         public Builder string(String... values) {
             strings.addAll(Arrays.asList(values));
+            return this;
+        }
+
+        public Builder methodString(String... values) {
+            methodStrings.addAll(Arrays.asList(values));
             return this;
         }
 
@@ -218,6 +244,7 @@ public final class MatchRule {
                     Collections.unmodifiableSet(strings),
                     Collections.unmodifiableSet(stringContains),
                     Collections.unmodifiableSet(getters),
+                    Collections.unmodifiableSet(methodStrings),
                     Collections.unmodifiableSet(methodShapes),
                     action);
         }

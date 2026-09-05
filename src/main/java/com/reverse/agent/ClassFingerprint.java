@@ -2,6 +2,7 @@ package com.reverse.agent;
 
 import org.objectweb.asm.Type;
 
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -43,14 +44,20 @@ public final class ClassFingerprint {
      */
     final Set<String> stringConstants;
 
+    /**
+     * 方法描述符 -> 方法内 LDC 字符串常量；匹配只依赖形状和语义字符串。
+     */
+    final Map<String, Set<String>> methodStrings;
+
     ClassFingerprint(String className, boolean hasKotlinMetadata,
                      Set<String> serialNames, Set<String> kotlinGetters,
-                     Set<String> stringConstants) {
+                     Set<String> stringConstants, Map<String, Set<String>> methodStrings) {
         this.className = className;
         this.hasKotlinMetadata = hasKotlinMetadata;
         this.serialNames = serialNames;
         this.kotlinGetters = kotlinGetters;
         this.stringConstants = stringConstants;
+        this.methodStrings = methodStrings;
     }
 
     /**
@@ -65,6 +72,10 @@ public final class ClassFingerprint {
      */
     boolean containsString(String value) {
         return stringConstants.contains(value);
+    }
+
+    Set<String> stringsForMethod(String descriptor) {
+        return methodStrings.getOrDefault(descriptor, Set.of());
     }
 
     /**

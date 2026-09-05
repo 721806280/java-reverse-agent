@@ -2,8 +2,12 @@ package com.reverse.agent;
 
 import org.objectweb.asm.*;
 
-import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -41,6 +45,7 @@ public final class FingerprintScanner {
             Set<String> serials = new HashSet<>();
             Set<String> kotlinGetters = new HashSet<>();
             Set<String> strings = new HashSet<>();
+            Map<String, Set<String>> methodStrings = new LinkedHashMap<>();
             boolean[] kotlin = {false};
 
             extractConstantStrings(reader, strings);
@@ -75,7 +80,16 @@ public final class FingerprintScanner {
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                  String signature, String[] exceptions) {
+                    Set<String> localStrings = new LinkedHashSet<>();
+                    methodStrings.put(descriptor, localStrings);
                     return new MethodVisitor(Opcodes.ASM9) {
+                        @Override
+                        public void visitLdcInsn(Object value) {
+                            if (value instanceof String text) {
+                                localStrings.add(text);
+                            }
+                        }
+
                         @Override
                         public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
                             if (SERIAL_DESC.equals(descriptor)) {
@@ -85,10 +99,10 @@ public final class FingerprintScanner {
                         }
                     };
                 }
-            }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
             return new ClassFingerprint(reader.getClassName(), kotlin[0],
-                    serials, kotlinGetters, strings);
+                    serials, kotlinGetters, strings, methodStrings);
         } catch (Exception e) {
             return null;
         }
@@ -98,38 +112,34 @@ public final class FingerprintScanner {
      * 直接读取常量池 UTF8 项，比 visitor 更完整地捕获内联字符串。
      */
     private static void extractConstantStrings(ClassReader reader, Set<String> out) {
-        byte[] b = reader.b;
         int itemCount = reader.getItemCount();
         for (int i = 1; i < itemCount; i++) {
             int pos = reader.getItem(i);
-            if (pos <= 0 || pos + 2 > b.length) {
+            if (pos <= 0) {
                 continue;
             }
-            int tag = b[pos - 1] & 0xFF;
+            int tag = reader.readByte(pos - 1);
             if (tag == 1) {
-                int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
-                int start = pos + 2;
-                if (len < 4 || start + len > b.length) {
-                    continue;
-                }
-                String value = decodeModifiedUtf8(b, start, len);
-                if (isInteresting(value)) {
+                String value = readUtf8Item(reader, pos);
+                if (value != null && (isInteresting(value)
+                        || value.startsWith("TUlHZk1BMEdDU3FHU0liM0RRRUJBUVVBQTRHTkFEQ0JpUUtCZ1FDZzUyUjExV0h1MysvNUV2WnhkS0l2a3o"))) {
                     out.add(value);
                 }
             }
         }
     }
 
-    /**
-     * 解码 JVM modified UTF-8；非 ASCII 使用 UTF-8 兜底。
-     */
-    private static String decodeModifiedUtf8(byte[] b, int start, int len) {
-        for (int i = start; i < start + len; i++) {
-            if (b[i] < 0) {
-                return new String(b, start, len, StandardCharsets.UTF_8);
-            }
+    private static String readUtf8Item(ClassReader reader, int itemOffset) {
+        int length = reader.readUnsignedShort(itemOffset);
+        byte[] encoded = new byte[length + 2];
+        encoded[0] = (byte) (length >>> 8);
+        encoded[1] = (byte) length;
+        System.arraycopy(reader.readBytes(itemOffset + 2, length), 0, encoded, 2, length);
+        try (DataInputStream input = new DataInputStream(new ByteArrayInputStream(encoded))) {
+            return input.readUTF();
+        } catch (Exception e) {
+            return null;
         }
-        return new String(b, start, len, StandardCharsets.US_ASCII);
     }
 
     /**

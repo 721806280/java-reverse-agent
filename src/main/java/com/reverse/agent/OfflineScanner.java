@@ -306,6 +306,7 @@ public final class OfflineScanner {
         if (!r.requireStrings.isEmpty()) conditions.add("常量含 " + r.requireStrings);
         if (!r.requireStringContains.isEmpty()) conditions.add("子串含 " + r.requireStringContains);
         if (!r.requireGetters.isEmpty()) conditions.add("Getter 含 " + r.requireGetters);
+        if (!r.requireMethodStrings.isEmpty()) conditions.add("目标方法常量含 " + r.requireMethodStrings);
         if (!r.requireMethodDescriptors.isEmpty()) conditions.add("方法形状: " + r.requireMethodDescriptors);
 
         return conditions.isEmpty() ? "（无条件，全量匹配）" : String.join(" | ", conditions);

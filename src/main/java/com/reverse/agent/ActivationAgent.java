@@ -88,10 +88,13 @@ public final class ActivationAgent {
                 .action(MatchRule.Action.DESERIALIZE_JSON)
                 .build());
 
-        // 本地校验核心：解密后的分支常量组合定位校验类。
+        // 本地校验核心：解密后的分支常量组合。若类内嵌固定公钥，
+        // 则其本地校验方法形状为 ()V；用公钥 + 该形状精确定位。
         rules.add(new MatchRule.Builder("neutralize-validator-core")
-                .string("feimao")
-                .string("keyNotExist")
+                .methodString("feimao")
+                .methodString("keyNotExist")
+                .methodString("TUlHZk1BMEdDU3FHU0liM0RRRUJBUVVBQTRHTkFEQ0JpUUtCZ1FDZzUyUjExV0h1MysvNUV2WnhkS0l2a3ovekpnS2VNUUhNLytMVkxSZS9zWUpFQlUxbUUrODc3MmJJckk4UThscldqSHc5cmVjQ1RWVVhXUnhWYXBndk1HYTZ3KzU4STZwYXdSaFhwZDBrRkhUY2xxeUZGWFpoS3ZiQUtoblphRGNuZkJtSkhObTQwR0JFTGpCTmx5MXpha2FIblFmUzF0QlhaSGQwOUV0c2VRSURBUUFC")
+                .methodShape(MatchRule.methodShape("()V"))
                 .action(MatchRule.Action.NEUTRALIZE)
                 .build());
 
