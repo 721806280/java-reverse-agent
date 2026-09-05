@@ -1,8 +1,8 @@
 package com.reverse.agent;
 
 import java.io.PrintStream;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 
 /**
  * Agent 专用轻量日志器——不依赖任何日志框架，避免污染宿主 classpath。
@@ -10,7 +10,7 @@ import java.util.Date;
  */
 public final class AgentLogger {
 
-    private static final SimpleDateFormat TS = new SimpleDateFormat("HH:mm:ss.SSS");
+    private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
     private final String tag;
     private final PrintStream out;
@@ -24,15 +24,11 @@ public final class AgentLogger {
         this.out = out;
     }
 
-    private static String now() {
-        return TS.format(new Date());
-    }
-
     public void info(String msg) {
-        out.println("[" + now() + "] [" + tag + "] " + msg);
+        out.println("[" + LocalTime.now().format(TIMESTAMP) + "] [" + tag + "] " + msg);
     }
 
     public void err(String msg) {
-        out.println("[" + now() + "] [" + tag + "] ❌ " + msg);
+        out.println("[" + LocalTime.now().format(TIMESTAMP) + "] [" + tag + "] ❌ " + msg);
     }
 }

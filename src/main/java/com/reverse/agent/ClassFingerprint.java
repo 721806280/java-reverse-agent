@@ -19,7 +19,7 @@ import java.util.Set;
 public final class ClassFingerprint {
 
     /**
-     * 内部名，如 {@code com/ccnode/codegenerator/aj/a}，仅供日志
+     * 内部名，仅供日志；匹配逻辑不使用它。
      */
     final String className;
 
@@ -54,7 +54,7 @@ public final class ClassFingerprint {
     }
 
     /**
-     * 该类的公开类名（点分隔），用于日志可读
+     * 点分隔类名，用于日志可读。
      */
     String dottedName() {
         return className.replace('/', '.');

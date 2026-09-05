@@ -2,6 +2,7 @@ package com.reverse.agent;
 
 import org.objectweb.asm.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -21,12 +22,6 @@ public final class FingerprintScanner {
             Type.getDescriptor(com.google.gson.annotations.SerializedName.class);
 
     private static final String METADATA_DESC = "Lkotlin/Metadata;";
-
-    /**
-     * Gson SerializedName 的注解描述符兜底（万一 gson 不在 classpath）
-     */
-    private static final String SERIAL_DESC_FALLBACK =
-            "Lcom/google/gson/annotations/SerializedName;";
 
     private FingerprintScanner() {
     }
@@ -48,7 +43,6 @@ public final class FingerprintScanner {
             Set<String> strings = new HashSet<>();
             boolean[] kotlin = {false};
 
-            // 额外：把常量池里的 UTF8 字符串直接捞一遍，比走 visitor 全更准
             extractConstantStrings(reader, strings);
 
             reader.accept(new ClassVisitor(Opcodes.ASM9) {
@@ -58,7 +52,7 @@ public final class FingerprintScanner {
                         kotlin[0] = true;
                         return new MetadataAnnotationVisitor(kotlinGetters);
                     }
-                    if (SERIAL_DESC.equals(descriptor) || SERIAL_DESC_FALLBACK.equals(descriptor)) {
+                    if (SERIAL_DESC.equals(descriptor)) {
                         return new SerialNameAnnotationVisitor(serials);
                     }
                     return null;
@@ -70,8 +64,7 @@ public final class FingerprintScanner {
                     return new FieldVisitor(Opcodes.ASM9) {
                         @Override
                         public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
-                            if (SERIAL_DESC.equals(descriptor)
-                                    || SERIAL_DESC_FALLBACK.equals(descriptor)) {
+                            if (SERIAL_DESC.equals(descriptor)) {
                                 return new SerialNameAnnotationVisitor(serials);
                             }
                             return null;
@@ -85,8 +78,7 @@ public final class FingerprintScanner {
                     return new MethodVisitor(Opcodes.ASM9) {
                         @Override
                         public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
-                            if (SERIAL_DESC.equals(descriptor)
-                                    || SERIAL_DESC_FALLBACK.equals(descriptor)) {
+                            if (SERIAL_DESC.equals(descriptor)) {
                                 return new SerialNameAnnotationVisitor(serials);
                             }
                             return null;
@@ -103,9 +95,7 @@ public final class FingerprintScanner {
     }
 
     /**
-     * 直接从 ClassReader 的常量池字节里抽 UTF8 项。
-     * ASM 的 {@code readUtf} 是包私有，这里用公开的 {@code b} / {@code getItem} 手解。
-     * 比 visitor 模式更全：能拿到代码内联 LDC 的字符串、注解默认值等。
+     * 直接读取常量池 UTF8 项，比 visitor 更完整地捕获内联字符串。
      */
     private static void extractConstantStrings(ClassReader reader, Set<String> out) {
         byte[] b = reader.b;
@@ -116,7 +106,6 @@ public final class FingerprintScanner {
                 continue;
             }
             int tag = b[pos - 1] & 0xFF;
-            // CONSTANT_Utf8 = 1
             if (tag == 1) {
                 int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
                 int start = pos + 2;
@@ -132,21 +121,19 @@ public final class FingerprintScanner {
     }
 
     /**
-     * 解码 JVM modified UTF-8（ASCII 子集够用，非 ASCII 近似处理）。
+     * 解码 JVM modified UTF-8；非 ASCII 使用 UTF-8 兜底。
      */
     private static String decodeModifiedUtf8(byte[] b, int start, int len) {
-        // 绝大多数业务字符串是纯 ASCII，直接构造即可；
-        // 遇到非 ASCII 用默认 UTF-8 兜底。
         for (int i = start; i < start + len; i++) {
             if (b[i] < 0) {
-                return new String(b, start, len, java.nio.charset.StandardCharsets.UTF_8);
+                return new String(b, start, len, StandardCharsets.UTF_8);
             }
         }
-        return new String(b, start, len, java.nio.charset.StandardCharsets.US_ASCII);
+        return new String(b, start, len, StandardCharsets.US_ASCII);
     }
 
     /**
-     * 过滤掉 JVM 内部噪声（java/、Lcom/、()V 签名等），保留有业务意义的字符串。
+     * 过滤 JVM 内部噪声，保留有业务意义的字符串。
      */
     private static boolean isInteresting(String value) {
         if (value.startsWith("java/") || value.startsWith("javax/")

@@ -6,25 +6,22 @@
 
     <groupId>com.reverse</groupId>
     <artifactId>java-reverse-agent</artifactId>
-    <version>0.0.1</version>
+    <version>0.0.1-SNAPSHOT</version>
     <name>java-reverse-agent</name>
     <description>基于指纹的 Java 字节码插桩 Agent + JAR 反编译工具（学习/研究用）</description>
     <packaging>jar</packaging>
 
     <properties>
-        <maven.compiler.source>25</maven.compiler.source>
-        <maven.compiler.target>25</maven.compiler.target>
+        <maven.compiler.release>16</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
         <asm.version>9.10.1</asm.version>
         <gson.version>2.14.0</gson.version>
         <cfr.version>0.152</cfr.version>
-        <javassist.version>3.33.0-GA</javassist.version>
     </properties>
 
     <dependencies>
-        <!-- ASM：字节码扫描与改写 -->
         <dependency>
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm</artifactId>
@@ -36,26 +33,18 @@
             <version>${asm.version}</version>
         </dependency>
 
-        <!-- Gson：@SerializedName 注解（指纹锚点） -->
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>${gson.version}</version>
         </dependency>
 
-        <!-- CFR：JAR 反编译器依赖 -->
         <dependency>
             <groupId>org.benf</groupId>
             <artifactId>cfr</artifactId>
             <version>${cfr.version}</version>
         </dependency>
 
-        <!-- javassist：备用字节码操作 -->
-        <dependency>
-            <groupId>org.javassist</groupId>
-            <artifactId>javassist</artifactId>
-            <version>${javassist.version}</version>
-        </dependency>
     </dependencies>
 
     <build>
@@ -67,8 +56,6 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>16</source>
-                    <target>16</target>
                     <encoding>${project.build.sourceEncoding}</encoding>
                 </configuration>
             </plugin>
@@ -88,7 +75,6 @@
                 </configuration>
             </plugin>
 
-            <!-- Fat-jar：把 ASM + gson shade 进去，产出可直接 -javaagent 使用的 java-reverse-agent-shaded.jar -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -113,7 +99,6 @@
                             </transformers>
                             <artifactSet>
                                 <excludes>
-                                    <exclude>org.javassist:javassist</exclude>
                                     <exclude>org.benf:cfr</exclude>
                                 </excludes>
                             </artifactSet>
