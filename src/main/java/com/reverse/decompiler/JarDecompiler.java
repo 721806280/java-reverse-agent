@@ -10,7 +10,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -22,10 +21,6 @@ import java.util.stream.Stream;
  * 用法：
  * <pre>
  *   java com.reverse.decompiler.JarDecompiler &lt;jar-or-class-path&gt; [输出目录]
- * </pre>
- * 无参直接运行（自动探测默认 jar）：
- * <pre>
- *   java com.reverse.decompiler.JarDecompiler
  * </pre>
  * 例如：
  * <pre>
@@ -46,18 +41,17 @@ public final class JarDecompiler {
 
     private static final Path DEFAULT_OUTPUT = Paths.get(DEFAULT_OUTPUT_DIR);
 
-    private static final String DEFAULT_SOURCE_DIR =
-            System.getProperty("user.home") + "/Downloads/MyBatisCodeHelper-Pro/lib";
-
-    private static final String DEFAULT_JAR_PREFIX = "instrumented-MyBatisCodeHelper-Pro";
-
     private static final Map<String, String> CFR_OPTIONS = createCfrOptions();
 
     public static void main(String[] args) {
+        if (args.length == 0) {
+            System.err.println("用法: java " + JarDecompiler.class.getName()
+                    + " <jar-or-class-path> [输出目录]");
+            System.exit(1);
+            return;
+        }
         try {
-            int successCount = (args.length == 0)
-                    ? run()
-                    : run(args[0], args.length >= 2 ? args[1] : DEFAULT_OUTPUT_DIR);
+            int successCount = run(args[0], args.length >= 2 ? args[1] : DEFAULT_OUTPUT_DIR);
             if (successCount == 0) {
                 System.exit(2);
             }
@@ -65,13 +59,6 @@ public final class JarDecompiler {
             System.err.println("❌ [ERROR] 程序异常: " + e.getMessage());
             System.exit(1);
         }
-    }
-
-    /**
-     * 自动探测默认目录下最新 JAR，并输出到默认目录。
-     */
-    public static int run() throws IOException {
-        return run(detectDefaultSource(), DEFAULT_OUTPUT);
     }
 
     /**
@@ -109,28 +96,6 @@ public final class JarDecompiler {
         Map<String, String> options = new LinkedHashMap<>();
         options.put("silent", "true");
         return options;
-    }
-
-    /**
-     * 在默认目录下探测最新匹配 JAR。
-     */
-    private static Path detectDefaultSource() throws IOException {
-        Path dir = Paths.get(DEFAULT_SOURCE_DIR);
-        if (!Files.isDirectory(dir)) {
-            throw new IllegalStateException("默认探测目录不存在: " + dir.toAbsolutePath()
-                    + "，请通过命令行参数指定输入路径: java " + JarDecompiler.class.getName()
-                    + " <jar-or-class-path> [输出目录]");
-        }
-        try (Stream<Path> jars = Files.list(dir)) {
-            Path latest = jars
-                    .filter(p -> p.getFileName().toString().startsWith(DEFAULT_JAR_PREFIX)
-                            && p.toString().endsWith(".jar"))
-                    .max((a, b) -> Long.compare(lastModified(a), lastModified(b)))
-                    .orElseThrow(() -> new NoSuchElementException(
-                            "未在 " + dir.toAbsolutePath() + " 下找到匹配 " + DEFAULT_JAR_PREFIX + "*.jar 的文件"));
-            System.out.println("🔎 [AUTO] 自动探测到输入: " + latest.getFileName());
-            return latest;
-        }
     }
 
     private static long lastModified(Path p) {

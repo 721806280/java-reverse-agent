@@ -51,8 +51,7 @@ public final class ActivationAgent {
     }
 
     /**
-     * 默认规则集——针对 MyBatisCodeHelper-Pro 的指纹，
-     * 但所有条件都是混淆免疫的语义特征。
+     * 默认规则集——所有条件都是混淆免疫的语义特征。
      */
     static List<MatchRule> buildDefaultRules() {
         List<MatchRule> rules = new ArrayList<>();

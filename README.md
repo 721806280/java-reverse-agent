@@ -114,4 +114,4 @@ java -cp target/java-reverse-agent-0.0.1-SNAPSHOT-shaded.jar \
   com.reverse.decompiler.JarDecompiler /path/to/input.jar ./decompiled
 ```
 
-不传参数时会探测默认目录下最新的 `instrumented-MyBatisCodeHelper-Pro*.jar`，并输出到 `.decompiled`。
+省略输出目录时，默认输出到当前目录下的 `.decompiled`。

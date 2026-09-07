@@ -222,7 +222,7 @@ public final class OfflineScanner {
 
         // 1. 头部概要信息
         sb.append(LINE_HEAVY).append("\n");
-        sb.append("                  🔍 MyBatisCodeHelper-Pro 指纹分析报告\n");
+        sb.append("                         🔍 语义指纹分析报告\n");
         sb.append(LINE_HEAVY).append("\n");
         sb.append(String.format("  📄 目标文件 : %s\n", target.getFileName()));
         sb.append(String.format("  📂 完整路径 : %s\n", target));
