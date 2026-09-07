@@ -120,7 +120,8 @@ public final class OfflineScanner {
                                                Map<String, String> hitEntryNames) {
         AgentLogger log = new AgentLogger("patch");
         String baseName = targetJar.getFileName().toString();
-        Path patchedJarPath = targetJar.resolveSibling(baseName + ".patched.jar");
+        String outputName = baseName.substring(0, baseName.lastIndexOf('.')) + "-patched.jar";
+        Path patchedJarPath = targetJar.resolveSibling(outputName);
 
         Map<String, byte[]> rewrittenEntries = new LinkedHashMap<>();
         List<String> failures = new ArrayList<>();
@@ -274,7 +275,7 @@ public final class OfflineScanner {
         sb.append(LINE_HEAVY).append("\n");
         sb.append("💡 运行提示:\n");
         sb.append("  • DRY-RUN 模式仅做安全扫描与指纹定位，不修改任何文件。\n");
-        sb.append("  • 追加 'apply' 参数可自动改写字节码并导出至 *.patched.jar。\n");
+        sb.append("  • 追加 'apply' 参数可自动改写字节码并导出至 *-patched.jar。\n");
         sb.append("  • 生产环境生效推荐使用 -javaagent 动态挂载机制。\n");
         sb.append(LINE_HEAVY).append("\n");
 
