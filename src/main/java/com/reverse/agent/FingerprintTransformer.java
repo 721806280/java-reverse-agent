@@ -35,7 +35,7 @@ public final class FingerprintTransformer implements ClassFileTransformer {
                 return "java/lang/Object";
             }
         };
-        ActionClassVisitor visitor = new ActionClassVisitor(writer, rule, fingerprint, log);
+        ActionClassVisitor visitor = new ActionClassVisitor(writer, rule, log);
         reader.accept(visitor, 0);
         return new RewriteResult(writer.toByteArray(), visitor.modifiedMethods);
     }
@@ -81,13 +81,13 @@ public final class FingerprintTransformer implements ClassFileTransformer {
             synchronized (hits) {
                 hits.put(className, rule);
             }
-            if (rule.action == MatchRule.Action.LOG_ONLY || dryRun) {
-                log.info("📷 [HIT" + (dryRun ? "(dry)" : "") + "] " + fingerprint + "  ⟶  " + rule);
+            if (dryRun) {
+                log.info("📷 [HIT(dry)] " + fingerprint + "  ⟶  " + rule);
                 return null;
             }
             RewriteResult rewritten = rewriteWithResult(buffer, rule, log);
             if (rewritten.modifiedMethods() == 0) {
-                log.err("⚠️ 命中规则但没有可改写方法: " + fingerprint.dottedName()
+                log.warn("命中规则但没有可改写方法: " + fingerprint.dottedName()
                         + " (" + rule.action + ")");
                 return null;
             }
@@ -110,20 +110,13 @@ public final class FingerprintTransformer implements ClassFileTransformer {
     private static final class ActionClassVisitor extends ClassVisitor {
         private final MatchRule rule;
         private final AgentLogger log;
-        private final ClassFingerprint fingerprint;
         private boolean done;
         private int modifiedMethods;
 
-        ActionClassVisitor(ClassVisitor classVisitor, MatchRule rule,
-                           ClassFingerprint fingerprint, AgentLogger log) {
+        ActionClassVisitor(ClassVisitor classVisitor, MatchRule rule, AgentLogger log) {
             super(Opcodes.ASM9, classVisitor);
             this.rule = rule;
-            this.fingerprint = fingerprint;
             this.log = log;
-        }
-
-        private static boolean isPrimitiveReturn(String returnPart) {
-            return returnPart.length() == 1 && "ZBCSIJFD".indexOf(returnPart.charAt(0)) >= 0;
         }
 
         @Override
@@ -131,56 +124,36 @@ public final class FingerprintTransformer implements ClassFileTransformer {
                                          String signature, String[] exceptions) {
             MethodVisitor methodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
             if ("<init>".equals(name) || "<clinit>".equals(name)
-                    || (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0
-                    || !rule.matchesMethod(descriptor)
-                    || !rule.matchesMethodStrings(fingerprint, descriptor)) {
+                    || (access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) {
                 return methodVisitor;
             }
 
             String returnPart = descriptor.substring(descriptor.indexOf(')') + 1);
             switch (rule.action) {
-                case NEUTRALIZE_ALL -> {
-                    if ("V".equals(returnPart)) {
-                        return modified(methodVisitor, name, descriptor, new NeutralizeVisitor(methodVisitor));
-                    }
-                    if (returnPart.startsWith("L") || returnPart.startsWith("[")) {
-                        return modified(methodVisitor, name, descriptor, new ReturnNullVisitor(methodVisitor));
-                    }
-                    if (isPrimitiveReturn(returnPart)) {
-                        return modified(methodVisitor, name, descriptor,
-                                new PrimitiveReturnVisitor(methodVisitor, returnPart.charAt(0)));
-                    }
-                }
-                case NEUTRALIZE -> {
-                    if (done || !descriptor.startsWith("()")) {
+                case FORCE_GETTER_VALUE -> {
+                    // 只改无参 getter，按返回形状分派强制值；跳过带参方法与构造器。
+                    // 设了 requireGetters 时按名字过滤；否则靠类级锚点定位，只认 Boolean/Long 返回型，
+                    // 其它返回型（如 String）不动。
+                    if (!descriptor.startsWith("()")
+                            || !(rule.requireGetters.isEmpty() || rule.requireGetters.contains(name))) {
                         return methodVisitor;
                     }
-                    if ("()V".equals(descriptor)) {
-                        done = true;
-                        return modified(methodVisitor, name, descriptor, new NeutralizeVisitor(methodVisitor));
-                    }
-                    if (descriptor.startsWith("()L") || descriptor.startsWith("()[")) {
-                        done = true;
-                        return modified(methodVisitor, name, descriptor, new ReturnNullVisitor(methodVisitor));
-                    }
-                }
-                case FORCE_TRUE -> {
-                    if ("()Z".equals(descriptor)
-                            && (rule.requireGetters.isEmpty() || rule.requireGetters.contains(name))) {
-                        return modified(methodVisitor, name, descriptor, new ForceTrueVisitor(methodVisitor));
+                    MethodVisitor forced = switch (returnPart) {
+                        case "Z" -> new ForceTrueVisitor(methodVisitor);
+                        case "Ljava/lang/Boolean;" -> new ForceBoxedBooleanVisitor(methodVisitor);
+                        case "J" -> new ForceLongVisitor(methodVisitor, MatchRule.FAR_FUTURE_MILLIS);
+                        case "Ljava/lang/Long;" ->
+                                new ForceBoxedLongVisitor(methodVisitor, MatchRule.FAR_FUTURE_MILLIS);
+                        default -> null;
+                    };
+                    if (forced != null) {
+                        return modified(name, descriptor, forced);
                     }
                 }
-                case RETURN_SUCCESS -> {
-                    if ("V".equals(returnPart)) {
-                        return modified(methodVisitor, name, descriptor, new NeutralizeVisitor(methodVisitor));
-                    }
-                    if (isPrimitiveReturn(returnPart)) {
-                        return modified(methodVisitor, name, descriptor,
-                                new PrimitiveReturnVisitor(methodVisitor, returnPart.charAt(0)));
-                    }
-                    if (returnPart.startsWith("L") || returnPart.startsWith("[")) {
-                        return modified(methodVisitor, name, descriptor,
-                                new ReturnSuccessVisitor(methodVisitor, returnPart));
+                case SILENCE_VOID -> {
+                    // 只清无参 void 方法体；带参与带返回值的方法保持原样。
+                    if (descriptor.equals("()V")) {
+                        return modified(name, descriptor, new SilenceVoidVisitor(methodVisitor));
                     }
                 }
                 case DESERIALIZE_JSON -> {
@@ -188,18 +161,15 @@ public final class FingerprintTransformer implements ClassFileTransformer {
                             && (returnPart.startsWith("L") || returnPart.startsWith("["))) {
                         done = true;
                         int argumentIndex = (access & Opcodes.ACC_STATIC) != 0 ? 0 : 1;
-                        return modified(methodVisitor, name, descriptor,
+                        return modified(name, descriptor,
                                 new JsonDeserializeVisitor(methodVisitor, returnPart, argumentIndex));
                     }
-                }
-                case LOG_ONLY -> {
                 }
             }
             return methodVisitor;
         }
 
-        private MethodVisitor modified(MethodVisitor original, String name, String descriptor,
-                                       MethodVisitor replacement) {
+        private MethodVisitor modified(String name, String descriptor, MethodVisitor replacement) {
             modifiedMethods++;
             log.info("   ↳" + rule.action + ": " + name + descriptor);
             return replacement;

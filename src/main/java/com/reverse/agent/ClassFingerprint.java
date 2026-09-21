@@ -2,7 +2,6 @@ package com.reverse.agent;
 
 import org.objectweb.asm.Type;
 
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -35,7 +34,7 @@ public final class ClassFingerprint {
     final Set<String> serialNames;
 
     /**
-     * Kotlin {@code @Metadata} d2 数组里提到的 getter 名（如 {@code getValid}）
+     * Kotlin {@code @Metadata} d2 数组里提到的 getter 名（形如 {@code getXxx}）
      */
     final Set<String> kotlinGetters;
 
@@ -44,20 +43,14 @@ public final class ClassFingerprint {
      */
     final Set<String> stringConstants;
 
-    /**
-     * 方法描述符 -> 方法内 LDC 字符串常量；匹配只依赖形状和语义字符串。
-     */
-    final Map<String, Set<String>> methodStrings;
-
     ClassFingerprint(String className, boolean hasKotlinMetadata,
                      Set<String> serialNames, Set<String> kotlinGetters,
-                     Set<String> stringConstants, Map<String, Set<String>> methodStrings) {
+                     Set<String> stringConstants) {
         this.className = className;
         this.hasKotlinMetadata = hasKotlinMetadata;
         this.serialNames = serialNames;
         this.kotlinGetters = kotlinGetters;
         this.stringConstants = stringConstants;
-        this.methodStrings = methodStrings;
     }
 
     /**
@@ -65,24 +58,6 @@ public final class ClassFingerprint {
      */
     String dottedName() {
         return className.replace('/', '.');
-    }
-
-    /**
-     * 是否含有指定的字符串常量
-     */
-    boolean containsString(String value) {
-        return stringConstants.contains(value);
-    }
-
-    Set<String> stringsForMethod(String descriptor) {
-        return methodStrings.getOrDefault(descriptor, Set.of());
-    }
-
-    /**
-     * 是否含指定的 @SerializedName 值
-     */
-    boolean containsSerial(String value) {
-        return serialNames.contains(value);
     }
 
     @Override

@@ -6,13 +6,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Enumeration;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
@@ -31,7 +25,7 @@ public final class OfflineScanner {
         throw new UnsupportedOperationException("Utility class cannot be instantiated");
     }
 
-    public static void main(String[] args) throws Exception {
+    static void main(String[] args) throws Exception {
         if (args.length < 1) {
             System.err.println("用法: java " + OfflineScanner.class.getName() + " <target.jar> [apply]");
             System.exit(1);
@@ -99,12 +93,46 @@ public final class OfflineScanner {
                     + patchResult.path().toAbsolutePath() + " ./.patched-src");
         }
 
+        // apply 后自动做字节码合法性校验，尽早暴露会触发 VerifyError 的改写。
+        boolean verifyFailed = false;
+        if (applyMode && patchResult.path() != null) {
+            verifyFailed = runVerification(patchResult.path());
+        }
+
         if (applyMode && !patchResult.failures().isEmpty()) {
             System.exit(3);
+        }
+        if (verifyFailed) {
+            System.exit(4);
         }
 
         if (hits.isEmpty()) {
             System.exit(2);
+        }
+    }
+
+    /**
+     * 对补丁 JAR 做字节码校验，返回是否存在非法方法。
+     */
+    private static boolean runVerification(Path patchedJar) {
+        AgentLogger log = new AgentLogger("verify");
+        try {
+            log.info("🔎 字节码校验: " + patchedJar.getFileName());
+            BytecodeVerifier.Result result = BytecodeVerifier.verifyJar(patchedJar);
+            if (result.ok()) {
+                log.info(String.format("✅ 校验通过：%d 个类 / %d 个方法，全部合法。",
+                        result.classes(), result.methods()));
+                return false;
+            }
+            log.err(String.format("❌ 校验失败：%d 个方法非法（会触发 VerifyError）：",
+                    result.failures().size()));
+            for (BytecodeVerifier.Failure f : result.failures()) {
+                log.err("   • " + f);
+            }
+            return true;
+        } catch (Exception e) {
+            log.warn("校验过程异常: " + e.getMessage());
+            return true;
         }
     }
 
@@ -130,9 +158,6 @@ public final class OfflineScanner {
         for (Map.Entry<String, MatchRule> hit : hits.entrySet()) {
             String dottedName = hit.getKey();
             MatchRule rule = hit.getValue();
-            if (rule.action == MatchRule.Action.LOG_ONLY) {
-                continue;
-            }
             attempted++;
             String entryName = hitEntryNames.get(dottedName);
             byte[] origBytes = hitBytes.get(dottedName);
@@ -141,14 +166,14 @@ public final class OfflineScanner {
                         FingerprintTransformer.rewriteWithResult(origBytes, rule, log);
                 if (result.modifiedMethods() == 0) {
                     String reason = "命中规则但没有可改写的方法";
-                    log.err("⚠️ 改写跳过: " + dottedName + " | 原因: " + reason);
+                    log.warn("改写跳过: " + dottedName + " | 原因: " + reason);
                     failures.add(dottedName + " | " + reason);
                     continue;
                 }
                 rewrittenEntries.put(entryName, result.bytes());
                 succeeded++;
             } catch (Exception e) {
-                log.err("⚠️ 改写失败: " + dottedName + " | 原因: " + e.getMessage());
+                log.warn("改写失败: " + dottedName + " | 原因: " + e.getMessage());
                 failures.add(dottedName + " | " + e.getMessage());
             }
         }
@@ -268,7 +293,7 @@ public final class OfflineScanner {
         sb.append(LINE_LIGHT).append("\n");
         sb.append("🛡️ 覆盖面评估\n");
         sb.append(LINE_LIGHT).append("\n");
-        coverageAssessment(sb, hits, patchResult);
+        coverageAssessment(sb, rules, hits, patchResult);
         sb.append("\n");
 
         // 4. 底部说明
@@ -292,23 +317,17 @@ public final class OfflineScanner {
 
     private static String actionZh(MatchRule.Action action) {
         return switch (action) {
-            case NEUTRALIZE -> "清空方法体";
-            case FORCE_TRUE -> "强制返回 true";
-            case LOG_ONLY -> "仅记录日志";
-            case RETURN_SUCCESS -> "返回成功对象";
             case DESERIALIZE_JSON -> "Gson反序列化";
-            case NEUTRALIZE_ALL -> "全量短路";
+            case FORCE_GETTER_VALUE -> "强制授权值";
+            case SILENCE_VOID -> "清空void子系统";
         };
     }
 
     private static String anchorZh(MatchRule r) {
         List<String> conditions = new ArrayList<>();
         if (!r.requireSerials.isEmpty()) conditions.add("@SerializedName 含 " + r.requireSerials);
-        if (!r.requireStrings.isEmpty()) conditions.add("常量含 " + r.requireStrings);
         if (!r.requireStringContains.isEmpty()) conditions.add("子串含 " + r.requireStringContains);
         if (!r.requireGetters.isEmpty()) conditions.add("Getter 含 " + r.requireGetters);
-        if (!r.requireMethodStrings.isEmpty()) conditions.add("目标方法常量含 " + r.requireMethodStrings);
-        if (!r.requireMethodDescriptors.isEmpty()) conditions.add("方法形状: " + r.requireMethodDescriptors);
 
         return conditions.isEmpty() ? "（无条件，全量匹配）" : String.join(" | ", conditions);
     }
@@ -321,64 +340,49 @@ public final class OfflineScanner {
             s.append(" | @SerializedName=").append(fp.serialNames);
         }
         if (!fp.kotlinGetters.isEmpty()) {
-            Set<String> highlight = new LinkedHashSet<>();
-            for (String g : fp.kotlinGetters) {
-                if ("getValid".equals(g) || "getUseFreeVersion".equals(g) || "getAlreadyTrail".equals(g)) {
-                    highlight.add(g);
-                }
-            }
             s.append(" | getters=").append(fp.kotlinGetters.size()).append("个");
-            if (!highlight.isEmpty()) {
-                s.append(" [关键: ").append(highlight).append("]");
-            }
         }
         s.append(" | 常量数=").append(fp.stringConstants.size());
         return s.toString();
     }
 
-    private static void coverageAssessment(StringBuilder sb, Map<String, MatchRule> hits,
-                                           PatchResult patchResult) {
-        int validator = 0, popup = 0, forceTrue = 0, parser = 0, janetfilter = 0;
-        int online = 0, respGate = 0;
-
+    private static void coverageAssessment(StringBuilder sb, List<MatchRule> rules,
+                                           Map<String, MatchRule> hits, PatchResult patchResult) {
+        Map<String, Integer> byRule = new LinkedHashMap<>();
         for (MatchRule r : hits.values()) {
-            if (r.name == null) continue;
-            switch (r.name) {
-                case "neutralize-validator-core" -> validator++;
-                case "neutralize-piracy-popup" -> popup++;
-                case "force-valid-true" -> forceTrue++;
-                case "deserialize-validate-json" -> parser++;
-                case "neutralize-janetfilter-probe" -> janetfilter++;
-                case "neutralize-online-validator" -> online++;
-                case "neutralize-online-resp-gate" -> respGate++;
-                default -> {
+            byRule.merge(r.name, 1, Integer::sum);
+        }
+
+        List<String> stale = new ArrayList<>();
+        List<String> coreMisses = new ArrayList<>();
+        for (MatchRule rule : rules) {
+            int actual = byRule.getOrDefault(rule.name, 0);
+            String flag = actual >= rule.minHits ? "✅" : "⚠️";
+            sb.append(String.format("  %s %-28s 命中 %d 个类 (期望 ≥%d)\n",
+                    flag, rule.name, actual, rule.minHits));
+            if (actual < rule.minHits) {
+                stale.add(rule.name);
+                if (rule.core) {
+                    coreMisses.add(rule.name);
                 }
             }
         }
-
-        sb.append(String.format("  • 校验核心链 : %d 个类 (包含关键分支判断)\n", validator));
-        sb.append(String.format("  • 盗版弹窗网 : %d 个类 (提示「购买正版」对话框)\n", popup));
-        sb.append(String.format("  • 状态闸门   : %d 个类 (Kotlin getValid 逻辑通道)\n", forceTrue));
-        sb.append(String.format("  • JSON解析器  : %d 个类 (字符串反序列化)\n", parser));
-        sb.append(String.format("  • 反破解探针 : %d 个类 (运行时 ja-netfilter 探测机制)\n", janetfilter));
-        sb.append(String.format("  • 联网验证层 : %d 个类 (在线验证 API 端点)\n", online));
-        sb.append(String.format("  • 联网响应闸 : %d 个类 (连通性探测短路机制)\n", respGate));
         sb.append("\n");
 
         boolean rewriteComplete = patchResult == null || patchResult.failures().isEmpty();
-        boolean allCategoriesHit = validator > 0 && forceTrue > 0 && parser > 0
-                && janetfilter > 0 && online > 0 && respGate > 0;
-        if (allCategoriesHit && rewriteComplete) {
-            sb.append("  ✅ [完整覆盖] 本地校验网、联网验证通道、JSON解析器及反破解探针均已精准定位并安全短路。\n");
-        } else if (!rewriteComplete) {
+        if (!coreMisses.isEmpty()) {
+            sb.append("  ⛔ [核心规则失效] 未达期望命中: ").append(coreMisses)
+                    .append(" —— 目标很可能已重新混淆，需更新对应锚点。\n");
+        }
+        if (!stale.isEmpty()) {
+            sb.append("  ⚠️ [锚点疑似失效] 以下规则命中低于期望，可能因目标改版/字符串加密而失配: ")
+                    .append(stale).append("\n");
+        }
+        if (!rewriteComplete) {
             sb.append("  ⚠️ [未完全成功] 至少存在 1 个目标类改写失败，请查阅 [patch] 详细日志。\n");
-        } else if (validator > 0 && forceTrue > 0) {
-            sb.append("  ◐ [部分覆盖] 本地主校验逻辑已覆盖");
-            if (online == 0) sb.append("，但【联网验证】未命中");
-            if (janetfilter == 0) sb.append("，【janetfilter 探针】未命中");
-            sb.append("。建议核对目标 JAR 是否存在版本更新。\n");
-        } else {
-            sb.append(String.format("  ⚠️ [覆盖受限] 匹配规则未完整生效 (当前核心校验链=%d, 闸门=%d)。请重新检查指纹规则描述。\n", validator, forceTrue));
+        }
+        if (stale.isEmpty() && rewriteComplete) {
+            sb.append("  ✅ [完整覆盖] 所有规则均已达期望命中并安全改写。\n");
         }
     }
 

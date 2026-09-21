@@ -1,119 +1,43 @@
 package com.reverse.agent;
 
-import org.objectweb.asm.*;
+import org.objectweb.asm.Label;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 
+/**
+ * 方法体整体替换的基类。
+ * <p>
+ * 关键点：父类 {@link MethodVisitor} 的委托传入 {@code null}，因此
+ * {@link org.objectweb.asm.ClassReader} 驱动的原方法体（各种 visitXxxInsn）
+ * 全部被丢弃；替换指令由子类在 {@link #emit()} 里通过 {@link #target}
+ * 直接写入真实的 writer，并由本类统一驱动 visitCode/visitMaxs/visitEnd。
+ */
 abstract class ReplacingMethodVisitor extends MethodVisitor {
-    ReplacingMethodVisitor(MethodVisitor methodVisitor) {
-        super(Opcodes.ASM9, methodVisitor);
+
+    /**
+     * 真实的下游 writer——替换指令写到这里。
+     */
+    final MethodVisitor target;
+
+    ReplacingMethodVisitor(MethodVisitor target) {
+        // 委托传 null：原方法体的所有回调都变成 no-op，被彻底压制。
+        super(Opcodes.ASM9, null);
+        this.target = target;
     }
+
+    /**
+     * 子类在此写入替换后的指令序列（不含 visitCode/visitMaxs/visitEnd）。
+     */
+    abstract void emit();
 
     @Override
-    public final void visitFrame(int type, int numLocal, Object[] local, int numStack, Object[] stack) {
-    }
-
-    @Override
-    public final void visitLabel(Label label) {
-    }
-
-    @Override
-    public final void visitLineNumber(int line, Label start) {
-    }
-
-    @Override
-    public final void visitTryCatchBlock(Label start, Label end, Label handler, String type) {
-    }
-
-    @Override
-    public final void visitLocalVariable(String name, String descriptor, String signature,
-                                         Label start, Label end, int index) {
-    }
-
-    @Override
-    public final void visitInsn(int opcode) {
-    }
-
-    @Override
-    public final void visitIntInsn(int opcode, int operand) {
-    }
-
-    @Override
-    public final void visitVarInsn(int opcode, int varIndex) {
-    }
-
-    @Override
-    public final void visitTypeInsn(int opcode, String type) {
-    }
-
-    @Override
-    public final void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
-    }
-
-    @Override
-    public final void visitMethodInsn(int opcode, String owner, String name,
-                                      String descriptor, boolean isInterface) {
-    }
-
-    @Override
-    public final void visitInvokeDynamicInsn(String name, String descriptor, Handle bootstrapMethod,
-                                             Object... bootstrapMethodArguments) {
-    }
-
-    @Override
-    public final void visitJumpInsn(int opcode, Label label) {
-    }
-
-    @Override
-    public final void visitLdcInsn(Object value) {
-    }
-
-    @Override
-    public final void visitIincInsn(int varIndex, int increment) {
-    }
-
-    @Override
-    public final void visitTableSwitchInsn(int min, int max, Label defaultHandler, Label... labels) {
-    }
-
-    @Override
-    public final void visitLookupSwitchInsn(Label defaultHandler, int[] keys, Label[] labels) {
-    }
-
-    @Override
-    public final void visitMultiANewArrayInsn(String descriptor, int numDimensions) {
-    }
-
-    @Override
-    public final AnnotationVisitor visitInsnAnnotation(int typeRef, TypePath typePath,
-                                                       String descriptor, boolean visible) {
-        return null;
-    }
-
-    @Override
-    public final AnnotationVisitor visitTryCatchAnnotation(int typeRef, TypePath typePath,
-                                                           String descriptor, boolean visible) {
-        return null;
-    }
-
-    @Override
-    public final AnnotationVisitor visitLocalVariableAnnotation(int typeRef, TypePath typePath,
-                                                                Label[] start, Label[] end, int[] indexes,
-                                                                String descriptor, boolean visible) {
-        return null;
-    }
-
-    @Override
-    public final void visitAttribute(Attribute attribute) {
-    }
-}
-
-final class NeutralizeVisitor extends ReplacingMethodVisitor {
-    NeutralizeVisitor(MethodVisitor methodVisitor) {
-        super(methodVisitor);
-    }
-
-    @Override
-    public void visitCode() {
-        super.visitInsn(Opcodes.RETURN);
+    public final void visitCode() {
+        target.visitCode();
+        emit();
+        // COMPUTE_MAXS / COMPUTE_FRAMES 会重算，这里传 0 即可。
+        target.visitMaxs(0, 0);
+        target.visitEnd();
     }
 }
 
@@ -123,77 +47,82 @@ final class ForceTrueVisitor extends ReplacingMethodVisitor {
     }
 
     @Override
-    public void visitCode() {
-        super.visitInsn(Opcodes.ICONST_1);
-        super.visitInsn(Opcodes.IRETURN);
+    void emit() {
+        target.visitInsn(Opcodes.ICONST_1);
+        target.visitInsn(Opcodes.IRETURN);
     }
 }
 
-final class ReturnNullVisitor extends ReplacingMethodVisitor {
-    ReturnNullVisitor(MethodVisitor methodVisitor) {
+/**
+ * 让 {@code ()Ljava/lang/Boolean;} getter 恒返回装箱的 {@link Boolean#TRUE}。
+ */
+final class ForceBoxedBooleanVisitor extends ReplacingMethodVisitor {
+    ForceBoxedBooleanVisitor(MethodVisitor methodVisitor) {
         super(methodVisitor);
     }
 
     @Override
-    public void visitCode() {
-        super.visitInsn(Opcodes.ACONST_NULL);
-        super.visitInsn(Opcodes.ARETURN);
+    void emit() {
+        target.visitFieldInsn(Opcodes.GETSTATIC, "java/lang/Boolean", "TRUE", "Ljava/lang/Boolean;");
+        target.visitInsn(Opcodes.ARETURN);
     }
 }
 
-final class PrimitiveReturnVisitor extends ReplacingMethodVisitor {
-    private final char returnType;
+/**
+ * 让 {@code ()J} getter 恒返回远期时间戳常量。
+ */
+final class ForceLongVisitor extends ReplacingMethodVisitor {
+    private final long value;
 
-    PrimitiveReturnVisitor(MethodVisitor methodVisitor, char returnType) {
+    ForceLongVisitor(MethodVisitor methodVisitor, long value) {
         super(methodVisitor);
-        this.returnType = returnType;
+        this.value = value;
     }
 
     @Override
-    public void visitCode() {
-        switch (returnType) {
-            case 'Z' -> super.visitInsn(Opcodes.ICONST_1);
-            case 'J' -> super.visitInsn(Opcodes.LCONST_0);
-            case 'F' -> super.visitInsn(Opcodes.FCONST_0);
-            case 'D' -> super.visitInsn(Opcodes.DCONST_0);
-            default -> super.visitInsn(Opcodes.ICONST_0);
-        }
-        switch (returnType) {
-            case 'J' -> super.visitInsn(Opcodes.LRETURN);
-            case 'F' -> super.visitInsn(Opcodes.FRETURN);
-            case 'D' -> super.visitInsn(Opcodes.DRETURN);
-            default -> super.visitInsn(Opcodes.IRETURN);
-        }
+    void emit() {
+        target.visitLdcInsn(value);
+        target.visitInsn(Opcodes.LRETURN);
     }
 }
 
-final class ReturnSuccessVisitor extends ReplacingMethodVisitor {
-    private final String returnDescriptor;
+/**
+ * 让 {@code ()Ljava/lang/Long;} getter 恒返回装箱的远期时间戳。
+ */
+final class ForceBoxedLongVisitor extends ReplacingMethodVisitor {
+    private final long value;
 
-    ReturnSuccessVisitor(MethodVisitor methodVisitor, String returnDescriptor) {
+    ForceBoxedLongVisitor(MethodVisitor methodVisitor, long value) {
         super(methodVisitor);
-        this.returnDescriptor = returnDescriptor;
+        this.value = value;
     }
 
     @Override
-    public void visitCode() {
-        super.visitTypeInsn(Opcodes.NEW, "com/google/gson/Gson");
-        super.visitInsn(Opcodes.DUP);
-        super.visitMethodInsn(Opcodes.INVOKESPECIAL, "com/google/gson/Gson",
-                "<init>", "()V", false);
-        super.visitLdcInsn("{\"success\":true}");
-        super.visitLdcInsn(Type.getType(returnDescriptor));
-        super.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "com/google/gson/Gson", "fromJson",
-                "(Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;", false);
-        super.visitTypeInsn(Opcodes.CHECKCAST, returnDescriptor);
-        super.visitInsn(Opcodes.ARETURN);
+    void emit() {
+        target.visitLdcInsn(value);
+        target.visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Long", "valueOf",
+                "(J)Ljava/lang/Long;", false);
+        target.visitInsn(Opcodes.ARETURN);
+    }
+}
+
+/**
+ * 把无参 {@code ()V} 方法整体清空为直接 {@code return}，从源头关停自成一体的过程。
+ */
+final class SilenceVoidVisitor extends ReplacingMethodVisitor {
+    SilenceVoidVisitor(MethodVisitor methodVisitor) {
+        super(methodVisitor);
+    }
+
+    @Override
+    void emit() {
+        target.visitInsn(Opcodes.RETURN);
     }
 }
 
 final class JsonDeserializeVisitor extends ReplacingMethodVisitor {
     private final String returnDescriptor;
     private final int argumentIndex;
-    private final Label originalEntry = new Label();
 
     JsonDeserializeVisitor(MethodVisitor methodVisitor, String returnDescriptor, int argumentIndex) {
         super(methodVisitor);
@@ -202,40 +131,24 @@ final class JsonDeserializeVisitor extends ReplacingMethodVisitor {
     }
 
     @Override
-    public void visitCode() {
-        super.visitVarInsn(Opcodes.ALOAD, argumentIndex);
-        super.visitJumpInsn(Opcodes.IFNULL, originalEntry);
-        super.visitVarInsn(Opcodes.ALOAD, argumentIndex);
-        super.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim",
-                "()Ljava/lang/String;", false);
-        super.visitInsn(Opcodes.DUP);
-        super.visitLdcInsn("{");
-        super.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "startsWith",
-                "(Ljava/lang/String;)Z", false);
-        Label parseObject = new Label();
-        Label parseArray = new Label();
-        Label parseJson = new Label();
-        super.visitJumpInsn(Opcodes.IFNE, parseObject);
-        super.visitLdcInsn("[");
-        super.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "startsWith",
-                "(Ljava/lang/String;)Z", false);
-        super.visitJumpInsn(Opcodes.IFNE, parseArray);
-        super.visitJumpInsn(Opcodes.GOTO, originalEntry);
-        super.visitLabel(parseObject);
-        super.visitInsn(Opcodes.POP);
-        super.visitJumpInsn(Opcodes.GOTO, parseJson);
-        super.visitLabel(parseArray);
-        super.visitLabel(parseJson);
-        super.visitTypeInsn(Opcodes.NEW, "com/google/gson/Gson");
-        super.visitInsn(Opcodes.DUP);
-        super.visitMethodInsn(Opcodes.INVOKESPECIAL, "com/google/gson/Gson",
+    void emit() {
+        // 参数为 null 时直接返回 null，否则用 Gson 反序列化为声明的返回类型。
+        Label deserialize = new Label();
+        target.visitVarInsn(Opcodes.ALOAD, argumentIndex);
+        target.visitJumpInsn(Opcodes.IFNONNULL, deserialize);
+        target.visitInsn(Opcodes.ACONST_NULL);
+        target.visitInsn(Opcodes.ARETURN);
+
+        target.visitLabel(deserialize);
+        target.visitTypeInsn(Opcodes.NEW, "com/google/gson/Gson");
+        target.visitInsn(Opcodes.DUP);
+        target.visitMethodInsn(Opcodes.INVOKESPECIAL, "com/google/gson/Gson",
                 "<init>", "()V", false);
-        super.visitVarInsn(Opcodes.ALOAD, argumentIndex);
-        super.visitLdcInsn(Type.getType(returnDescriptor));
-        super.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "com/google/gson/Gson", "fromJson",
+        target.visitVarInsn(Opcodes.ALOAD, argumentIndex);
+        target.visitLdcInsn(Type.getType(returnDescriptor));
+        target.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "com/google/gson/Gson", "fromJson",
                 "(Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;", false);
-        super.visitTypeInsn(Opcodes.CHECKCAST, returnDescriptor);
-        super.visitInsn(Opcodes.ARETURN);
-        super.visitLabel(originalEntry);
+        target.visitTypeInsn(Opcodes.CHECKCAST, Type.getType(returnDescriptor).getInternalName());
+        target.visitInsn(Opcodes.ARETURN);
     }
 }

@@ -25,32 +25,33 @@
 | `src/main/java/com/reverse/agent/MatchRule.java` | 定义锚点、方法形状过滤器和动作 |
 | `src/main/java/com/reverse/agent/FingerprintTransformer.java` | 运行时匹配与字节码改写 |
 | `src/main/java/com/reverse/agent/BytecodeVisitors.java` | 方法体替换实现 |
-| `src/main/java/com/reverse/agent/OfflineScanner.java` | 离线扫描报告与补丁 JAR 生成 |
+| `src/main/java/com/reverse/agent/OfflineScanner.java` | 离线扫描报告、补丁 JAR 生成与命中量级自检 |
+| `src/main/java/com/reverse/agent/BytecodeVerifier.java` | 逐方法数据流校验，捕获会触发 VerifyError 的非法字节码 |
 | `src/main/java/com/reverse/decompiler/JarDecompiler.java` | 基于 CFR 的 JAR/class 反编译工具 |
 
 ## 默认规则
 
-当前默认规则集共 7 条：
+授权体系最终收敛到少数几个**混淆稳定**的语义闸门，因此默认规则集只保留 3 条，直接改裁决源头，而不是去逐个短路散落的验证过程方法（后者锚在业务明文串上，目标重新混淆就失效，维护成本高）。
 
-| 规则 | 锚点 | 动作 |
-|---|---|---|
-| `neutralize-online-validator` | `mybatispaidinfo/`、`okhttp3/OkHttpClient`、指定方法形状 | 全量短路 |
-| `neutralize-online-resp-gate` | `response is not success`、指定方法形状 | 返回成功对象 |
-| `deserialize-validate-json` | `gson catch exception, the json string is` | Gson 反序列化 |
-| `neutralize-validator-core` | 同一 `()V` 方法内包含 `feimao`、`keyNotExist` 和内嵌公钥 | 清空方法体 |
-| `neutralize-piracy-popup` | `brucege.com/pay/view`、`购买正版` | 清空方法体 |
-| `neutralize-janetfilter-probe` | `com/bruce/User`、`field not exist` | 清空方法体 |
-| `force-valid-true` | Kotlin metadata 中的 `getValid` | 强制返回 `true` |
+| 规则 | 语义闸门 | 锚点 | 动作 |
+|---|---|---|---|
+| `force-license-verdict` | Gate A 裁决 DTO | `@SerializedName` 同时含 `valid`+`validTo`+`paidKey` | 强制授权值 |
+| `force-profile-valid` | Gate B 全局状态 | Kotlin metadata 中 `getValid`+`getUseFreeVersion`+`getAlreadyTrail` 共存 | 强制授权值 |
+| `deserialize-validate-json` | RSA 旁路 | `gson catch exception, the json string is` | Gson 反序列化 |
+
+三条规则的分工：
+
+- **Gate A（主力）**：所有验证路径最终都把服务器/本地数据反序列化成裁决 DTO，再读 `getValid()`/`getValidTo()`。`@SerializedName` 是服务器通信契约，混淆改不动。强制 `getValid()` 返回 `true`、`getValidTo()` 返回远期时间戳，从根上让裁决恒为“已授权”。这一条同时解决了「杀单开关」——复验读到的 `valid` 永远为真、`validTo` 永远未过期，本地密钥文件因此不会被删除。
+- **Gate B**：Kotlin 全局授权态 `Profile`，`getValid` 等 getter 直接被 UI/功能判断读取，强制为“已授权”。锚点是 Kotlin `@Metadata`，同样混淆免疫。
+- **RSA 旁路**：粘贴的明文激活 JSON 不是密文，正常路径 `Base64+RSA` 解密必抛异常，激活在读到 Gate A 之前就崩溃。这条规则把解密方法改成直接 `gson` 反序列化，让明文 JSON 能被解析成裁决 DTO。这是 Gate A/B 无法替代的一环，锚点是异常日志串（相对稳定），标注为过渡锚点。
 
 动作含义：
 
-- `NEUTRALIZE`：清空首个匹配形状的无参方法体。
-- `NEUTRALIZE_ALL`：清空规则范围内所有匹配方法；void 直接返回，引用返回 `null`，primitive 返回默认值。
-- `RETURN_SUCCESS`：让匹配方法返回一个成功对象。
+- `FORCE_GETTER_VALUE`：按无参 getter 的返回形状强制“已授权”值——`()Z`→`true`、`()Ljava/lang/Boolean;`→`Boolean.TRUE`、`()J`/`()Ljava/lang/Long;`→远期时间戳。设了 getter 名单时只改名单内的；否则靠类级序列化契约锁定类，只认返回形状唯一的 Boolean/Long getter（String getter 如 paidKey/userMac 不动）。
 - `DESERIALIZE_JSON`：把 String 参数反序列化为方法声明的引用返回类型。
-- `FORCE_TRUE`：让匹配的 boolean getter 恒返回 `true`。
+- 另有 `NEUTRALIZE` / `NEUTRALIZE_ALL` / `RETURN_SUCCESS` / `FORCE_TRUE` 等动作保留在 `MatchRule.Action` 中，供自定义规则使用。
 
-命中数量随目标 JAR 版本和混淆结果变化，以 `OfflineScanner` 报告为准。
+命中数量随目标 JAR 版本和混淆结果变化，以 `OfflineScanner` 报告为准。报告尾部会对每条规则做**命中量级自检**：实际命中低于期望即输出「锚点疑似失效」告警，其中 Gate A/B 属核心闸门，未命中会额外醒目提示——目标一旦重新混淆导致锚点失配，第一时间可见，而不必等插件崩溃。
 
 ## 构建
 
@@ -82,7 +83,18 @@ java -cp target/java-reverse-agent-0.0.1-SNAPSHOT-shaded.jar \
   com.reverse.agent.OfflineScanner /path/to/target.jar apply
 ```
 
-输出文件为 `/path/to/target-patched.jar`，不会覆盖原 JAR。退出码：`0` 表示有命中，`2` 表示无命中，`3` 表示存在改写失败。
+输出文件为 `/path/to/target-patched.jar`，不会覆盖原 JAR。apply 完成后会自动对补丁 JAR 做字节码合法性校验。退出码：`0` 表示有命中，`2` 表示无命中，`3` 表示存在改写失败，`4` 表示补丁字节码校验不通过（会触发 VerifyError）。
+
+## 字节码校验
+
+对任意 JAR 逐方法做数据流校验，捕获会在类加载期触发 `VerifyError` 的非法字节码（`apply` 已内置调用，也可单独运行）：
+
+```bash
+java -cp target/java-reverse-agent-0.0.1-SNAPSHOT-shaded.jar \
+  com.reverse.agent.BytecodeVerifier /path/to/target-patched.jar
+```
+
+用 ASM `BasicVerifier`，不加载被引用类型，因此不会因目标 JAR 的 IntelliJ/Kotlin 依赖缺失而产生假阳性。退出码：`0` 全部合法，`4` 存在非法方法。
 
 ## 挂载 Agent
 

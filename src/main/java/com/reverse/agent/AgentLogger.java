@@ -25,10 +25,18 @@ public final class AgentLogger {
     }
 
     public void info(String msg) {
-        out.println("[" + LocalTime.now().format(TIMESTAMP) + "] [" + tag + "] " + msg);
+        log("", msg);
+    }
+
+    public void warn(String msg) {
+        log("⚠️ ", msg);
     }
 
     public void err(String msg) {
-        out.println("[" + LocalTime.now().format(TIMESTAMP) + "] [" + tag + "] ❌ " + msg);
+        log("❌ ", msg);
+    }
+
+    private void log(String level, String msg) {
+        out.println("[" + LocalTime.now().format(TIMESTAMP) + "] [" + tag + "] " + level + msg);
     }
 }

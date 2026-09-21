@@ -5,9 +5,6 @@ import org.objectweb.asm.*;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -45,7 +42,6 @@ public final class FingerprintScanner {
             Set<String> serials = new HashSet<>();
             Set<String> kotlinGetters = new HashSet<>();
             Set<String> strings = new HashSet<>();
-            Map<String, Set<String>> methodStrings = new LinkedHashMap<>();
             boolean[] kotlin = {false};
 
             extractConstantStrings(reader, strings);
@@ -80,16 +76,7 @@ public final class FingerprintScanner {
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                  String signature, String[] exceptions) {
-                    Set<String> localStrings = methodStrings.computeIfAbsent(
-                            descriptor, key -> new LinkedHashSet<>());
                     return new MethodVisitor(Opcodes.ASM9) {
-                        @Override
-                        public void visitLdcInsn(Object value) {
-                            if (value instanceof String text) {
-                                localStrings.add(text);
-                            }
-                        }
-
                         @Override
                         public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
                             if (SERIAL_DESC.equals(descriptor)) {
@@ -102,7 +89,7 @@ public final class FingerprintScanner {
             }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
 
             return new ClassFingerprint(reader.getClassName(), kotlin[0],
-                    serials, kotlinGetters, strings, methodStrings);
+                    serials, kotlinGetters, strings);
         } catch (Exception e) {
             return null;
         }
@@ -121,8 +108,7 @@ public final class FingerprintScanner {
             int tag = reader.readByte(pos - 1);
             if (tag == 1) {
                 String value = readUtf8Item(reader, pos);
-                if (value != null && (isInteresting(value)
-                        || value.startsWith("TUlHZk1BMEdDU3FHU0liM0RRRUJBUVVBQTRHTkFEQ0JpUUtCZ1FDZzUyUjExV0h1MysvNUV2WnhkS0l2a3o"))) {
+                if (value != null && isInteresting(value)) {
                     out.add(value);
                 }
             }
@@ -196,7 +182,7 @@ public final class FingerprintScanner {
 
     /**
      * 读取 Kotlin {@code @Metadata(d2=[...])} 数组。
-     * {@code d2} 里形如 {@code "getValid", "setValid", "valid", "(...)Z", ...}，
+     * {@code d2} 里形如 {@code "getXxx", "setXxx", "xxx", "(...)Z", ...}，
      * 只收集以 {@code get} 开头的语义名作为 getter 锚点。
      */
     private static final class MetadataAnnotationVisitor extends AnnotationVisitor {

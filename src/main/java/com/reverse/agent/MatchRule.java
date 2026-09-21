@@ -13,62 +13,66 @@ import java.util.Set;
  */
 public final class MatchRule {
 
-    /** 规则名，仅用于日志。 */
-    final String name;
-
-    /** 必须命中的 @SerializedName 值。 */
-    final Set<String> requireSerials;
-
-    /** 必须整串命中的字符串常量。 */
-    final Set<String> requireStrings;
+    /**
+     * FORCE_GETTER_VALUE 对 long/Long 返回型 getter 写入的远期时间戳常量（约公元 2123 年）——
+     * 远超任何合理有效期，用于让「返回时间戳」型的判断恒落在未来。
+     */
+    static final long FAR_FUTURE_MILLIS = 4859711999000L;
 
     /**
-     * 改写目标方法必须包含的全部字符串常量。空集表示不做方法级限定。
+     * 规则名，仅用于日志与自检报告。
      */
-    final Set<String> requireMethodStrings;
+    final String name;
 
-    /** 必须作为子串命中的字符串常量。 */
+    /**
+     * 必须命中的 @SerializedName 值。
+     */
+    final Set<String> requireSerials;
+
+    /**
+     * 必须作为子串命中的字符串常量。
+     */
     final Set<String> requireStringContains;
 
-    /** 必须命中的 Kotlin getter 语义名。 */
+    /**
+     * 必须命中的 Kotlin getter 语义名。
+     */
     final Set<String> requireGetters;
 
     /**
-     * 可选的方法形状过滤器。为空时作用于所有方法；
-     * 只比较参数数量和返回类型，不包含混淆后的包名/类名。
+     * 命中后对该类执行的动作。
      */
-    final Set<String> requireMethodDescriptors;
-
-    /** 命中后对该类执行的动作。 */
     final Action action;
 
+    /**
+     * 期望的最小命中类数——实际命中低于此值即视为「锚点疑似失效」（目标改版/重新混淆）。
+     */
+    final int minHits;
+
+    /**
+     * 是否核心规则——核心规则未达 {@link #minHits} 时单独高危告警。
+     */
+    final boolean core;
+
     private MatchRule(String name, Set<String> requireSerials,
-                      Set<String> requireStrings, Set<String> requireStringContains,
-                      Set<String> requireGetters, Set<String> requireMethodStrings,
-                      Set<String> requireMethodDescriptors,
-                      Action action) {
+                      Set<String> requireStringContains, Set<String> requireGetters,
+                      Action action, int minHits, boolean core) {
         this.name = name;
         this.requireSerials = requireSerials;
-        this.requireStrings = requireStrings;
-        this.requireMethodStrings = requireMethodStrings;
         this.requireStringContains = requireStringContains;
         this.requireGetters = requireGetters;
-        this.requireMethodDescriptors = requireMethodDescriptors;
         this.action = action;
+        this.minHits = minHits;
+        this.core = core;
     }
 
-    /** 所有非空要求集都需被包含才算命中。 */
+    /**
+     * 所有非空要求集都需被包含才算命中。
+     */
     boolean matches(ClassFingerprint fp) {
         if (!requireSerials.isEmpty()
                 && !fp.serialNames.containsAll(requireSerials)) {
             return false;
-        }
-        if (!requireStrings.isEmpty()) {
-            for (String s : requireStrings) {
-                if (!fp.containsString(s)) {
-                    return false;
-                }
-            }
         }
         if (!requireStringContains.isEmpty()) {
             for (String needle : requireStringContains) {
@@ -91,110 +95,52 @@ public final class MatchRule {
                 }
             }
         }
-        if (!requireMethodStrings.isEmpty()) {
-            boolean found = fp.methodStrings.values().stream()
-                    .anyMatch(strings -> strings.containsAll(requireMethodStrings));
-            if (!found) {
-                return false;
-            }
-        }
         return true;
-    }
-
-    boolean matchesMethodStrings(ClassFingerprint fingerprint, String descriptor) {
-        return requireMethodStrings.isEmpty()
-                || fingerprint.stringsForMethod(descriptor).containsAll(requireMethodStrings);
-    }
-
-    /** 判断方法形状是否属于本规则的可改写范围。 */
-    boolean matchesMethod(String descriptor) {
-        return requireMethodDescriptors.isEmpty()
-                || requireMethodDescriptors.contains(methodShape(descriptor));
-    }
-
-    static String methodShape(String descriptor) {
-        int argumentsEnd = descriptor.indexOf(')');
-        String arguments = descriptor.substring(1, argumentsEnd);
-        String returnType = descriptor.substring(argumentsEnd + 1);
-        return "args=" + countDescriptors(arguments) + ",return=" + returnTypeKind(returnType);
-    }
-
-    private static int countDescriptors(String arguments) {
-        int count = 0;
-        for (int i = 0; i < arguments.length(); i++) {
-            count++;
-            i += descriptorLength(arguments, i) - 1;
-        }
-        return count;
-    }
-
-    private static int descriptorLength(String descriptor, int offset) {
-        int index = offset;
-        while (descriptor.charAt(index) == '[') {
-            index++;
-        }
-        if (descriptor.charAt(index) == 'L') {
-            return descriptor.indexOf(';', index) + 1 - offset;
-        }
-        return 1;
-    }
-
-    private static String returnTypeKind(String returnType) {
-        if ("V".equals(returnType)) {
-            return "void";
-        }
-        if (returnType.startsWith("[")) {
-            return "array";
-        }
-        if (returnType.startsWith("L")) {
-            return "object";
-        }
-        return "primitive:" + returnType;
     }
 
     @Override
     public String toString() {
         return "Rule[" + name + "] serials=" + requireSerials
-                + " strings=" + requireStrings
-                + " methodStrings=" + requireMethodStrings
                 + " contains=" + requireStringContains
                 + " getters=" + requireGetters
-                + " shapes=" + requireMethodDescriptors
                 + " action=" + action;
     }
 
     public enum Action {
-        /** 清空首个无参方法体。 */
-        NEUTRALIZE,
-
-        /** 让 boolean getter 恒返回 true。 */
-        FORCE_TRUE,
-
-        /** 只记录命中，不改字节码。 */
-        LOG_ONLY,
-
-        /** 返回一个表示成功的对象。 */
-        RETURN_SUCCESS,
-
-        /** 将单个 String 参数反序列化为方法声明的引用返回类型。 */
+        /**
+         * 把方法体换成「直接 gson 反序列化单个 String 参数为其声明的引用返回类型」，
+         * 绕过原有的 Base64+RSA 解密，使明文 JSON 也能被解析。
+         */
         DESERIALIZE_JSON,
 
         /**
-         * 清空规则范围内的全部方法体：void 返回，引用返回 null，primitive 返回默认值。
+         * 强制无参 getter 返回固定值，按返回形状分派：
+         * {@code ()Z}/{@code ()Ljava/lang/Boolean;} 返回 true，
+         * {@code ()J}/{@code ()Ljava/lang/Long;} 返回远期时间戳。
+         * 若规则设了 {@link #requireGetters}，只改名字命中的 getter；
+         * 否则按返回形状定位，不依赖方法名。
          */
-        NEUTRALIZE_ALL
+        FORCE_GETTER_VALUE,
+
+        /**
+         * 把命中类的所有无参 {@code ()V} 方法整体清空为直接 {@code return}。
+         * 用于从源头关停自成一体的过程（如后台线程入口/工作/回调方法），比"改结果"更彻底。
+         * 只清无参 void，带参与带返回值的方法保持原样。
+         */
+        SILENCE_VOID
     }
 
-    /** 构建器。 */
+    /**
+     * 构建器。
+     */
     public static final class Builder {
         private final String name;
         private final Set<String> serials = new LinkedHashSet<>();
-        private final Set<String> strings = new LinkedHashSet<>();
-        private final Set<String> methodStrings = new LinkedHashSet<>();
         private final Set<String> stringContains = new LinkedHashSet<>();
         private final Set<String> getters = new LinkedHashSet<>();
-        private final Set<String> methodShapes = new LinkedHashSet<>();
-        private Action action = Action.NEUTRALIZE;
+        private Action action = Action.FORCE_GETTER_VALUE;
+        private int minHits = 1;
+        private boolean core = false;
 
         public Builder(String name) {
             this.name = name;
@@ -202,16 +148,6 @@ public final class MatchRule {
 
         public Builder serial(String... values) {
             serials.addAll(Arrays.asList(values));
-            return this;
-        }
-
-        public Builder string(String... values) {
-            strings.addAll(Arrays.asList(values));
-            return this;
-        }
-
-        public Builder methodString(String... values) {
-            methodStrings.addAll(Arrays.asList(values));
             return this;
         }
 
@@ -225,28 +161,27 @@ public final class MatchRule {
             return this;
         }
 
-        /**
-         * 限定规则只作用于指定方法形状（例如 {@code args=1,return=primitive:Z}）。
-         */
-        public Builder methodShape(String... values) {
-            methodShapes.addAll(Arrays.asList(values));
+        public Builder action(Action action) {
+            this.action = action;
             return this;
         }
 
-        public Builder action(Action action) {
-            this.action = action;
+        public Builder minHits(int minHits) {
+            this.minHits = minHits;
+            return this;
+        }
+
+        public Builder core(boolean core) {
+            this.core = core;
             return this;
         }
 
         public MatchRule build() {
             return new MatchRule(name,
                     Collections.unmodifiableSet(serials),
-                    Collections.unmodifiableSet(strings),
                     Collections.unmodifiableSet(stringContains),
                     Collections.unmodifiableSet(getters),
-                    Collections.unmodifiableSet(methodStrings),
-                    Collections.unmodifiableSet(methodShapes),
-                    action);
+                    action, minHits, core);
         }
     }
 }

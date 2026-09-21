@@ -43,7 +43,7 @@ public final class JarDecompiler {
 
     private static final Map<String, String> CFR_OPTIONS = createCfrOptions();
 
-    public static void main(String[] args) {
+    static void main(String[] args) {
         if (args.length == 0) {
             System.err.println("用法: java " + JarDecompiler.class.getName()
                     + " <jar-or-class-path> [输出目录]");

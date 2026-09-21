@@ -1,0 +1,46 @@
+{
+  "rules": [
+    {
+      "name": "force-license-verdict",
+      "serials": ["valid", "validTo", "paidKey"],
+      "action": "FORCE_GETTER_VALUE",
+      "minHits": 1,
+      "core": true
+    },
+    {
+      "name": "force-profile-valid",
+      "getters": ["getValid", "getUseFreeVersion", "getAlreadyTrail"],
+      "action": "FORCE_GETTER_VALUE",
+      "minHits": 1,
+      "core": true
+    },
+    {
+      "name": "force-online-verdict",
+      "serials": ["encraptString", "canBeUsed"],
+      "action": "FORCE_GETTER_VALUE",
+      "minHits": 1,
+      "core": true
+    },
+    {
+      "name": "silence-online-report",
+      "stringContains": ["reportAndCheckValid"],
+      "action": "SILENCE_VOID",
+      "minHits": 1,
+      "core": false
+    },
+    {
+      "name": "silence-offline-recheck",
+      "stringContains": ["feimao"],
+      "action": "SILENCE_VOID",
+      "minHits": 8,
+      "core": false
+    },
+    {
+      "name": "deserialize-validate-json",
+      "stringContains": ["gson catch exception, the json string is"],
+      "action": "DESERIALIZE_JSON",
+      "minHits": 1,
+      "core": false
+    }
+  ]
+}
