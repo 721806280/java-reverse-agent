@@ -9,7 +9,7 @@
     },
     {
       "name": "force-profile-valid",
-      "getters": ["getValid", "getUseFreeVersion", "getAlreadyTrail"],
+      "getters": ["getValid", "getAlreadyTrail"],
       "action": "FORCE_GETTER_VALUE",
       "minHits": 1,
       "core": true

@@ -36,13 +36,13 @@
 | 规则 | 语义闸门 | 锚点 | 动作 |
 |---|---|---|---|
 | `force-license-verdict` | Gate A 裁决 DTO | `@SerializedName` 同时含 `valid`+`validTo`+`paidKey` | 强制授权值 |
-| `force-profile-valid` | Gate B 全局状态 | Kotlin metadata 中 `getValid`+`getUseFreeVersion`+`getAlreadyTrail` 共存 | 强制授权值 |
+| `force-profile-valid` | Gate B 全局状态 | Kotlin metadata 中 `getValid`+`getAlreadyTrail` 共存 | 强制授权值 |
 | `deserialize-validate-json` | RSA 旁路 | `gson catch exception, the json string is` | Gson 反序列化 |
 
 三条规则的分工：
 
 - **Gate A（主力）**：所有验证路径最终都把服务器/本地数据反序列化成裁决 DTO，再读 `getValid()`/`getValidTo()`。`@SerializedName` 是服务器通信契约，混淆改不动。强制 `getValid()` 返回 `true`、`getValidTo()` 返回远期时间戳，从根上让裁决恒为“已授权”。这一条同时解决了「杀单开关」——复验读到的 `valid` 永远为真、`validTo` 永远未过期，本地密钥文件因此不会被删除。
-- **Gate B**：Kotlin 全局授权态 `Profile`，`getValid` 等 getter 直接被 UI/功能判断读取，强制为“已授权”。锚点是 Kotlin `@Metadata`，同样混淆免疫。
+- **Gate B**：Kotlin 全局授权态 `Profile`，`getValid` 等 getter 直接被 UI/功能判断读取，强制为“已授权”。通过 Kotlin `@Metadata` 中的 `getValid` 和 `getAlreadyTrail` 同时定位，只改写这两个 Boolean getter。3.6.8+2321 的 `Profile` 已无 `getUseFreeVersion`，因此不再将它作为必要锚点。
 - **RSA 旁路**：粘贴的明文激活 JSON 不是密文，正常路径 `Base64+RSA` 解密必抛异常，激活在读到 Gate A 之前就崩溃。这条规则把解密方法改成直接 `gson` 反序列化，让明文 JSON 能被解析成裁决 DTO。这是 Gate A/B 无法替代的一环，锚点是异常日志串（相对稳定），标注为过渡锚点。
 
 动作含义：
